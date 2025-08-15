@@ -1,0 +1,4 @@
+{
+    "command": "python init_db.py && cd db_visualizer && PORT=<port> HOST=<host> BROWSER=none npm start",
+    "working_directory": "/home/kavia/workspace/code-generation/medverify-blockchain-platform-159823-159832/medical_prescription_database"
+}
