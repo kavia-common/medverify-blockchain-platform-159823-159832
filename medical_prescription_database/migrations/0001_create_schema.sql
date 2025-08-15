@@ -29,11 +29,14 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Update timestamp on users
+-- SQLite does not support modifying NEW.* in BEFORE UPDATE triggers.
+-- We use an AFTER UPDATE trigger to set updated_at via a separate UPDATE.
+-- NOTE: recursive_triggers is OFF by default in SQLite, so this UPDATE will not retrigger this trigger.
 CREATE TRIGGER IF NOT EXISTS trg_users_updated_at
-BEFORE UPDATE ON users
+AFTER UPDATE ON users
 FOR EACH ROW
 BEGIN
-    SET NEW.updated_at = CURRENT_TIMESTAMP;
+    UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- User <-> Roles (many-to-many)
@@ -71,11 +74,12 @@ CREATE TABLE IF NOT EXISTS prescriptions (
 );
 
 -- Update timestamp on prescriptions
+-- Use AFTER UPDATE + UPDATE pattern due to SQLite trigger limitations.
 CREATE TRIGGER IF NOT EXISTS trg_prescriptions_updated_at
-BEFORE UPDATE ON prescriptions
+AFTER UPDATE ON prescriptions
 FOR EACH ROW
 BEGIN
-    SET NEW.updated_at = CURRENT_TIMESTAMP;
+    UPDATE prescriptions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- Blockchain references for prescriptions
