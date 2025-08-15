@@ -1,132 +1,82 @@
 #!/usr/bin/env python3
-"""Initialize SQLite database for medical_prescription_database"""
+"""Initialize the SQLite database for the medical_prescription_database.
 
-import sqlite3
+This script:
+- Resolves the database path from SQLITE_DB or defaults to ./myapp.db
+- Runs all SQL migrations in ./migrations using db_migrate.py
+- Writes connection details to db_connection.txt
+- Generates db_visualizer/sqlite.env for the local Node.js DB viewer
+
+Healthcare note:
+If you require HL7/FHIR-aligned data structures (e.g., FHIR MedicationRequest, Patient), please let us know.
+This schema uses a pragmatic structure with roles (doctor, pharmacist, patient), prescriptions, audit logs, and blockchain references.
+"""
+
 import os
+import sys
+from datetime import datetime
 
-DB_NAME = "myapp.db"
-DB_USER = "kaviasqlite"  # Not used for SQLite, but kept for consistency
-DB_PASSWORD = "kaviadefaultpassword"  # Not used for SQLite, but kept for consistency
-DB_PORT = "5000"  # Not used for SQLite, but kept for consistency
+# PUBLIC_INTERFACE
+def get_db_path() -> str:
+    """Return the path to the SQLite database file using the SQLITE_DB env var or default to 'myapp.db'."""
+    return os.getenv("SQLITE_DB", "myapp.db")
 
-print("Starting SQLite setup...")
-
-# Check if database already exists
-db_exists = os.path.exists(DB_NAME)
-if db_exists:
-    print(f"SQLite database already exists at {DB_NAME}")
-    # Verify it's accessible
+# PUBLIC_INTERFACE
+def write_connection_info(db_path: str) -> None:
+    """Persist connection instructions for developers and other containers."""
+    connection_string = f"sqlite:///{os.path.abspath(db_path)}"
     try:
-        conn = sqlite3.connect(DB_NAME)
-        conn.execute("SELECT 1")
-        conn.close()
-        print("Database is accessible and working.")
+        with open("db_connection.txt", "w", encoding="utf-8") as f:
+            f.write("# SQLite connection methods:\n")
+            f.write(f"# Python: sqlite3.connect('{db_path}')\n")
+            f.write(f"# Connection string: {connection_string}\n")
+            f.write(f"# File path: {os.path.abspath(db_path)}\n")
+        print("✓ Connection information saved to db_connection.txt")
     except Exception as e:
-        print(f"Warning: Database exists but may be corrupted: {e}")
-else:
-    print("Creating new SQLite database...")
+        print(f"Warning: Could not save connection info: {e}")
 
-# Create database with sample tables
-conn = sqlite3.connect(DB_NAME)
-cursor = conn.cursor()
+# PUBLIC_INTERFACE
+def write_visualizer_env(db_path: str) -> None:
+    """Create or update db_visualizer/sqlite.env with the resolved SQLite DB path."""
+    try:
+        os.makedirs("db_visualizer", exist_ok=True)
+        with open("db_visualizer/sqlite.env", "w", encoding="utf-8") as f:
+            f.write(f'export SQLITE_DB="{os.path.abspath(db_path)}"\n')
+        print("✓ Environment variables saved to db_visualizer/sqlite.env")
+    except Exception as e:
+        print(f"Warning: Could not save environment variables: {e}")
 
-# Create initial schema
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS app_info (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key TEXT UNIQUE NOT NULL,
-        value TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-""")
+# PUBLIC_INTERFACE
+def run_migrations() -> None:
+    """Run database migrations using the local migration runner."""
+    from db_migrate import migrate
+    migrate()
 
-# Create a sample users table as an example
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-""")
+def main() -> None:
+    print("Starting SQLite database initialization...")
+    db_path = get_db_path()
+    print(f"Resolved DB path: {db_path}")
 
-# Insert initial data
-cursor.execute("INSERT OR REPLACE INTO app_info (key, value) VALUES (?, ?)", 
-               ("project_name", "medical_prescription_database"))
-cursor.execute("INSERT OR REPLACE INTO app_info (key, value) VALUES (?, ?)", 
-               ("version", "0.1.0"))
-cursor.execute("INSERT OR REPLACE INTO app_info (key, value) VALUES (?, ?)", 
-               ("author", "John Doe"))
-cursor.execute("INSERT OR REPLACE INTO app_info (key, value) VALUES (?, ?)", 
-               ("description", ""))
+    # Ensure parent dir exists for custom paths
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
-conn.commit()
+    # Run migrations
+    run_migrations()
 
-# Get database statistics
-cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-table_count = cursor.fetchone()[0]
+    # Write helper files
+    write_connection_info(db_path)
+    write_visualizer_env(db_path)
 
-cursor.execute("SELECT COUNT(*) FROM app_info")
-record_count = cursor.fetchone()[0]
+    print("\nInitialization complete.")
+    print(f"Database: {os.path.basename(db_path)}")
+    print(f"Location: {os.path.abspath(db_path)}")
+    print("\nTo use with Node.js viewer, run: source db_visualizer/sqlite.env")
+    print("\nReminders:")
+    print("- Ensure the backend container uses the same SQLITE_DB path via environment variables.")
+    print("- For FHIR/HL7 compatible schemas, open a ticket to extend the data model accordingly.")
+    print(f"- Timestamp: {datetime.utcnow().isoformat()}Z")
 
-conn.close()
-
-# Save connection information to a file
-current_dir = os.getcwd()
-connection_string = f"sqlite:///{current_dir}/{DB_NAME}"
-
-try:
-    with open("db_connection.txt", "w") as f:
-        f.write(f"# SQLite connection methods:\n")
-        f.write(f"# Python: sqlite3.connect('{DB_NAME}')\n")
-        f.write(f"# Connection string: {connection_string}\n")
-        f.write(f"# File path: {current_dir}/{DB_NAME}\n")
-    print("Connection information saved to db_connection.txt")
-except Exception as e:
-    print(f"Warning: Could not save connection info: {e}")
-
-# Create environment variables file for Node.js viewer
-db_path = os.path.abspath(DB_NAME)
-
-# Ensure db_visualizer directory exists
-if not os.path.exists("db_visualizer"):
-    os.makedirs("db_visualizer", exist_ok=True)
-    print("Created db_visualizer directory")
-
-try:
-    with open("db_visualizer/sqlite.env", "w") as f:
-        f.write(f"export SQLITE_DB=\"{db_path}\"\n")
-    print(f"Environment variables saved to db_visualizer/sqlite.env")
-except Exception as e:
-    print(f"Warning: Could not save environment variables: {e}")
-
-print("\nSQLite setup complete!")
-print(f"Database: {DB_NAME}")
-print(f"Location: {current_dir}/{DB_NAME}")
-print("")
-
-print("To use with Node.js viewer, run: source db_visualizer/sqlite.env")
-
-print("\nTo connect to the database, use one of the following methods:")
-print(f"1. Python: sqlite3.connect('{DB_NAME}')")
-print(f"2. Connection string: {connection_string}")
-print(f"3. Direct file access: {current_dir}/{DB_NAME}")
-print("")
-
-print("Database statistics:")
-print(f"  Tables: {table_count}")
-print(f"  App info records: {record_count}")
-
-# If sqlite3 CLI is available, show how to use it
-try:
-    import subprocess
-    result = subprocess.run(['which', 'sqlite3'], capture_output=True, text=True)
-    if result.returncode == 0:
-        print("")
-        print("SQLite CLI is available. You can also use:")
-        print(f"  sqlite3 {DB_NAME}")
-except:
-    pass
-
-# Exit successfully
-print("\nScript completed successfully.")
+if __name__ == "__main__":
+    main()

@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""Interactive SQLite database shell for medical_prescription_database"""
+"""Interactive SQLite database shell for medical_prescription_database
 
+Resolves the DB path from SQLITE_DB env var or defaults to ./myapp.db.
+"""
+
+import os
 import sqlite3
 import sys
 
-DB_NAME = "myapp.db"
+DB_NAME = os.getenv("SQLITE_DB", "myapp.db")
 
 def print_help():
     """Print help information"""
-    print("""
+    print(f"""
 SQLite Interactive Shell Commands:
   .help                Show this help message
   .tables              List all tables
   .schema [table]      Show CREATE statements
   .describe [table]    Show table structure
   .quit or .exit       Exit the shell
-  
+
 Standard SQL commands are also supported (SELECT, INSERT, UPDATE, DELETE, etc.)
+Current database: {DB_NAME}
 """)
 
 def list_tables(cursor):
