@@ -84,6 +84,36 @@ def _validate_applied_checksums(conn: sqlite3.Connection) -> None:
         else:
             print(f"WARNING: Migration file {filename} no longer exists on disk.")
 
+def _ensure_users_public_id_column(conn: sqlite3.Connection) -> None:
+    """Preflight: ensure users.public_id exists for backward-compat and create index if missing.
+
+    This avoids relying on 'ALTER TABLE ... ADD COLUMN IF NOT EXISTS', which some SQLite versions don't support,
+    and prevents later index migrations from failing if the column is missing. Idempotent and safe.
+    """
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.execute("PRAGMA table_info(users)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "public_id" not in cols:
+            # Temporarily disable FK enforcement for schema change safety
+            conn.execute("PRAGMA foreign_keys = OFF")
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN public_id TEXT")
+                print("✓ Preflight: added users.public_id column")
+            finally:
+                conn.execute("PRAGMA foreign_keys = ON")
+            conn.commit()
+
+        # Try to create index (no-op if exists)
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
+            conn.commit()
+        except sqlite3.Error:
+            # If index creation fails due to very old SQLite, subsequent migrations may handle it.
+            pass
+    except sqlite3.Error as e:
+        print(f"WARNING: Preflight ensure public_id column failed (continuing): {e}")
+
 # PUBLIC_INTERFACE
 def migrate() -> None:
     """Apply all pending migrations."""
@@ -93,6 +123,10 @@ def migrate() -> None:
     conn = _connect(db_path)
     try:
         _ensure_migrations_table(conn)
+
+        # Preflight compatibility fix: make sure users.public_id exists before running .sql files.
+        _ensure_users_public_id_column(conn)
+
         _validate_applied_checksums(conn)
 
         applied_map = {fn: ch for fn, ch in _applied_migrations(conn)}
@@ -115,7 +149,8 @@ def migrate() -> None:
             try:
                 with conn:
                     conn.executescript("PRAGMA foreign_keys = ON;")
-                    conn.executescript(sql)
+                    if sql.strip():
+                        conn.executescript(sql)
                     conn.execute(
                         "INSERT INTO schema_migrations (filename, checksum, applied_at) VALUES (?, ?, ?)",
                         (filename, checksum, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
